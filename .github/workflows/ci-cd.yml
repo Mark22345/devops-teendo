@@ -38,7 +38,7 @@ jobs:
 
       - name: Teszteredmények mentése
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: test-results
           path: |
@@ -68,7 +68,7 @@ jobs:
       - name: Image exportálása artifactként
         run: docker save $IMAGE_NAME:${GITHUB_SHA} | gzip > image.tar.gz
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         with:
           name: docker-image
           path: image.tar.gz
@@ -94,7 +94,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: actions/download-artifact@v6
+      - uses: actions/download-artifact@v7
         with:
           name: docker-image
 
