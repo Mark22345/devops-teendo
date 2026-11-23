@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="hu">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Teendőlista</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; color: #222; }
+    h1 { margin-bottom: .2rem; }
+    .muted { color: #777; font-size: .85rem; }
+    form { display: flex; gap: .5rem; margin: 1rem 0; }
+    input[type=text] { flex: 1; padding: .5rem; }
+    button, select { padding: .5rem .8rem; }
+    ul { list-style: none; padding: 0; }
+    li { display: flex; align-items: center; gap: .5rem; padding: .5rem; border-bottom: 1px solid #eee; }
+    li.done span.title { text-decoration: line-through; color: #999; }
+    span.title { flex: 1; }
+    .prio { font-size: .75rem; padding: .1rem .4rem; border-radius: 4px; background: #eee; }
+    .prio.high { background: #fdd; } .prio.low { background: #def; }
+    .error { color: #b00; }
+  </style>
+</head>
+<body>
+  <h1>Teendőlista</h1>
+  <div class="muted">Verzió: {{ version }} · <span id="stats"></span></div>
+
+  <form id="new">
+    <input type="text" id="title" placeholder="Új teendő..." maxlength="200" required>
+    <select id="priority">
+      <option value="normal">normál</option>
+      <option value="high">magas</option>
+      <option value="low">alacsony</option>
+    </select>
+    <button type="submit">Hozzáadás</button>
+  </form>
+  <div id="error" class="error"></div>
+  <ul id="list"></ul>
+
+  <script>
+    const PRIO = { high: "magas", normal: "normál", low: "alacsony" };
+    async function api(method, url, body) {
+      const res = await fetch(url, {
+        method, headers: { "Content-Type": "application/json" },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      if (!res.ok) throw new Error((await res.json()).error || res.statusText);
+      return res.status === 204 ? null : res.json();
+    }
+    async function refresh() {
+      const [todos, stats] = await Promise.all([api("GET", "/api/todos"), api("GET", "/api/stats")]);
+      document.getElementById("stats").textContent =
+        `${stats.done}/${stats.total} kész (${stats.completion_percent}%)`;
+      const list = document.getElementById("list");
+      list.replaceChildren(...todos.map(t => {
+        const li = document.createElement("li");
+        if (t.done) li.className = "done";
+        const cb = Object.assign(document.createElement("input"), { type: "checkbox", checked: t.done });
+        cb.onchange = () => api("PATCH", `/api/todos/${t.id}`, { done: cb.checked }).then(refresh);
+        const title = Object.assign(document.createElement("span"), { className: "title", textContent: t.title });
+        const prio = Object.assign(document.createElement("span"), { className: `prio ${t.priority}`, textContent: PRIO[t.priority] });
+        const del = Object.assign(document.createElement("button"), { textContent: "Törlés" });
+        del.onclick = () => api("DELETE", `/api/todos/${t.id}`).then(refresh);
+        li.append(cb, title, prio, del);
+        return li;
+      }));
+    }
+    document.getElementById("new").onsubmit = async (e) => {
+      e.preventDefault();
+      const err = document.getElementById("error");
+      err.textContent = "";
+      try {
+        await api("POST", "/api/todos", {
+          title: document.getElementById("title").value,
+          priority: document.getElementById("priority").value,
+        });
+        document.getElementById("title").value = "";
+        await refresh();
+      } catch (ex) { err.textContent = ex.message; }
+    };
+    refresh();
+  </script>
+</body>
+</html>

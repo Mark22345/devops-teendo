@@ -1,0 +1,143 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE_NAME: teendo-app
+
+jobs:
+  # 1. lépés: kódminőség-ellenőrzés és automatikus tesztek
+  test:
+    name: Lint és tesztek
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Függőségek telepítése
+        run: pip install -r requirements-dev.txt
+
+      - name: Lint (flake8)
+        run: flake8 app tests
+
+      - name: Unit és API tesztek (pytest + lefedettség)
+        run: pytest -v --cov=app --cov-report=term-missing --cov-report=xml --cov-fail-under=80 --junitxml=test-results.xml
+
+      - name: Teszteredmények mentése
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: |
+            test-results.xml
+            coverage.xml
+
+  # 2. lépés: Docker image (a telepítendő artifact) buildelése és ellenőrzése
+  build:
+    name: Docker image build
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Image buildelése
+        run: |
+          docker build \
+            --build-arg APP_VERSION=${GITHUB_SHA::7} \
+            -t $IMAGE_NAME:${GITHUB_SHA} .
+
+      - name: Konténer füstteszt
+        run: |
+          docker run -d --name smoke -p 8080:8080 $IMAGE_NAME:${GITHUB_SHA}
+          bash scripts/smoke_test.sh http://localhost:8080
+          docker rm -f smoke
+
+      - name: Image exportálása artifactként
+        run: docker save $IMAGE_NAME:${GITHUB_SHA} | gzip > image.tar.gz
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: docker-image
+          path: image.tar.gz
+          retention-days: 7
+
+      - name: Publikálás a GitHub Container Registry-be (csak main ágon)
+        if: github.event_name != 'pull_request'
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          OWNER=$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
+          for TAG in ${GITHUB_SHA} latest; do
+            docker tag $IMAGE_NAME:${GITHUB_SHA} ghcr.io/$OWNER/$IMAGE_NAME:$TAG
+            docker push ghcr.io/$OWNER/$IMAGE_NAME:$TAG
+          done
+
+  # 3. lépés: telepítés a Kubernetes sandbox környezetbe és ellenőrzés
+  deploy:
+    name: Deploy a sandbox környezetbe
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment: sandbox
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: docker-image
+
+      - name: Image betöltése
+        run: gunzip -c image.tar.gz | docker load
+
+      - name: Kind (Kubernetes) sandbox cluster létrehozása
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: sandbox
+          config: k8s/kind-config.yaml
+
+      - name: Image betöltése a clusterbe
+        run: kind load docker-image $IMAGE_NAME:${GITHUB_SHA} --name sandbox
+
+      - name: Kubernetes manifestek alkalmazása
+        run: |
+          sed -i "s|IMAGE_PLACEHOLDER|$IMAGE_NAME:${GITHUB_SHA}|" k8s/deployment.yaml
+          kubectl apply -f k8s/namespace.yaml
+          kubectl apply -f k8s/deployment.yaml -f k8s/service.yaml
+
+      - name: Várakozás a sikeres rolloutra
+        run: kubectl rollout status deployment/teendo-app -n teendo --timeout=180s
+
+      - name: Füstteszt a telepített alkalmazáson (Definition of Done)
+        run: bash scripts/smoke_test.sh http://localhost:8080
+
+      - name: Telepítés állapota
+        if: always()
+        run: |
+          kubectl get all -n teendo -o wide
+          kubectl describe deployment teendo-app -n teendo
+          kubectl logs deployment/teendo-app -n teendo --tail=50 || true
+
+      - name: Összefoglaló
+        run: |
+          {
+            echo "## Telepítés sikeres :rocket:"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Image | \`$IMAGE_NAME:${GITHUB_SHA::7}\` |"
+            echo "| Környezet | kind Kubernetes sandbox (namespace: \`teendo\`) |"
+            echo "| Health | \`$(curl -fsS http://localhost:8080/health)\` |"
+            echo "| Statisztika | \`$(curl -fsS http://localhost:8080/api/stats)\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
