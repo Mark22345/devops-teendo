@@ -3,7 +3,8 @@
 **Projekt:** Teendőlista mini alkalmazás end-to-end CI/CD pipeline-nal
 **Kurzus:** DevOps
 **Hallgató:** _<név, Neptun-kód>_
-**Repository:** _<https://github.com/...>_
+**Repository:** https://github.com/Mark22345/devops-teendo
+**Pipeline futások:** https://github.com/Mark22345/devops-teendo/actions
 **Dátum:** 2026. december
 
 ---

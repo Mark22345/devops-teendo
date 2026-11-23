@@ -20,9 +20,9 @@ jobs:
     name: Lint és tesztek
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -38,7 +38,7 @@ jobs:
 
       - name: Teszteredmények mentése
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: test-results
           path: |
@@ -51,7 +51,7 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Image buildelése
         run: |
@@ -68,7 +68,7 @@ jobs:
       - name: Image exportálása artifactként
         run: docker save $IMAGE_NAME:${GITHUB_SHA} | gzip > image.tar.gz
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: docker-image
           path: image.tar.gz
@@ -92,9 +92,9 @@ jobs:
     runs-on: ubuntu-latest
     environment: sandbox
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v6
         with:
           name: docker-image
 
